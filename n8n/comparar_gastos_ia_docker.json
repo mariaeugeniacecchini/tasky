@@ -1,0 +1,122 @@
+{
+  "name": "Comparar Gastos por Mes",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "telegram_compare",
+        "options": {}
+      },
+      "id": "1",
+      "name": "Telegram /comparar",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookDescription": {
+        "httpMethod": "POST",
+        "path": "telegram_compare"
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = $json[\"message\"][\"text\"] || '';\\nconst parts = text.split(' ');\\nif (parts.length < 3) {\\n  return [{ error: 'Uso: /comparar mes1 mes2' }];\\n}\\nreturn [{ mes1: parts[1].toLowerCase(), mes2: parts[2].toLowerCase(), chat_id: $json[\"message\"][\"chat\"][\"id\"] }];"
+      },
+      "id": "2",
+      "name": "Parsear Comando",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT categoria, SUM(total) as total, EXTRACT(MONTH FROM fecha::date) as mes FROM facturas WHERE TO_CHAR(fecha, 'Month') ILIKE {{$json[\"mes1\"] || '%'}} OR TO_CHAR(fecha, 'Month') ILIKE {{$json[\"mes2\"] || '%'}} GROUP BY categoria, mes ORDER BY mes;"
+      },
+      "id": "3",
+      "name": "Consultar Gastos DB",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [750, 300],
+      "credentials": {
+        "postgres": {
+          "id": "postgres_cred_id",
+          "name": "Postgres DB"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const ChartJsImage = require('chartjs-to-image');\\nconst grouped = {};\\nfor (const row of items[0].json) {\\n  if (!grouped[row.categoria]) grouped[row.categoria] = {};\\n  grouped[row.categoria][row.mes] = parseFloat(row.total);\\n}\\nconst categorias = Object.keys(grouped);\\nconst meses = Array.from(new Set(Object.values(items[0].json).map(r => r.mes))).sort();\\nconst datasets = meses.map(mes => ({\\n  label: `Mes ${mes}`,\\n  data: categorias.map(cat => grouped[cat][mes] || 0),\\n  fill: false\\n}));\\n\\nconst chart = new ChartJsImage();\\nchart.setConfig({\\n  type: 'bar',\\n  data: {\\n    labels: categorias,\\n    datasets\\n  },\\n  options: {\\n    title: { display: true, text: 'Comparación de Gastos por Categoría' },\\n    scales: { yAxes: [{ ticks: { beginAtZero: true } }] }\\n  }\\n});\\n\\nconst url = chart.getUrl();\\nreturn [{ url, chat_id: $json[\"chat_id\"] }];"
+      },
+      "id": "4",
+      "name": "Generar Gráfico (Chart.js)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json[\"chat_id\"]}}",
+        "photo": "={{$json[\"url\"]}}",
+        "caption": "Comparación de gastos generada 📊"
+      },
+      "id": "5",
+      "name": "Enviar Gráfico por Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1250, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram_cred_id",
+          "name": "Telegram Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram /comparar": {
+      "main": [
+        [
+          {
+            "node": "Parsear Comando",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parsear Comando": {
+      "main": [
+        [
+          {
+            "node": "Consultar Gastos DB",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Consultar Gastos DB": {
+      "main": [
+        [
+          {
+            "node": "Generar Gráfico (Chart.js)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generar Gráfico (Chart.js)": {
+      "main": [
+        [
+          {
+            "node": "Enviar Gráfico por Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true
+}

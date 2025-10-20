@@ -1,0 +1,7 @@
+flask
+openai
+pillow
+requests
+pdfplumber
+pytesseract
+pdf2image

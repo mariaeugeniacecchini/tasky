@@ -1,0 +1,96 @@
+{
+  "name": "Chatbot Facturas IA",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "telegram_in",
+        "options": {}
+      },
+      "name": "Telegram Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "telegram_in"
+    },
+    {
+      "parameters": {
+        "url": "http://ocr_ia:5000/process",
+        "responseFormat": "json",
+        "sendBinaryData": true,
+        "binaryPropertyName": "data"
+      },
+      "name": "Llamar Servicio IA (OCR Donut)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 2,
+      "position": [520, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO facturas (chat_id, contenido) VALUES ({{$json[\"chat_id\"]}}, '{{$json[\"texto\"] || \"\"}}');"
+      },
+      "name": "Guardar en Base de Datos",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 1,
+      "position": [780, 300],
+      "credentials": {
+        "postgres": {
+          "id": "__REPLACE_WITH_YOUR_PG_ID__",
+          "name": "Conexion Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{$json[\"chat_id\"]}}",
+        "text": "={{$json[\"texto\"] ? $json[\"texto\"] : \"Factura procesada correctamente 🧾✅\"}}"
+      },
+      "name": "Responder en Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [1040, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "__REPLACE_WITH_YOUR_TELEGRAM_ID__",
+          "name": "Cuenta Telegram"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Webhook": {
+      "main": [
+        [
+          {
+            "node": "Llamar Servicio IA (OCR Donut)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Llamar Servicio IA (OCR Donut)": {
+      "main": [
+        [
+          {
+            "node": "Guardar en Base de Datos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Guardar en Base de Datos": {
+      "main": [
+        [
+          {
+            "node": "Responder en Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true
+}

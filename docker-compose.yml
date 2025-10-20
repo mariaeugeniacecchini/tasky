@@ -1,0 +1,109 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: db_facturas
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_pass
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - pgdata:/var/lib/postgresql/data
+    secrets:
+      - db_pass
+    ports:
+      - "5432:5432"
+    networks:
+      - tasky_net
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n
+    restart: always
+    depends_on:
+      - postgres
+      - ocr_ia
+    environment:
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: ${N8N_USER}
+      N8N_BASIC_AUTH_PASSWORD_FILE: /run/secrets/n8n_pass
+      DB_TYPE: postgres
+      DB_POSTGRES_HOST: postgres
+      DB_POSTGRES_PORT: 5432
+      DB_POSTGRES_DATABASE: ${DB_NAME}
+      DB_POSTGRES_USER: ${DB_USER}
+      DB_POSTGRES_PASSWORD_FILE: /run/secrets/db_pass
+      GENERIC_TIMEZONE: "America/Argentina/Buenos_Aires"
+    secrets:
+      - db_pass
+      - n8n_pass
+    ports:
+      - "5678:5678"
+    volumes:
+      - ./n8n:/home/node/.n8n
+      - /tmp:/tmp
+    networks:
+      - tasky_net
+
+  ocr_ia:
+    build: ./ocr_ia
+    container_name: ocr_ia
+    restart: always
+    working_dir: /app
+    command: python invoice_ai_service.py
+    ports:
+      - "5000:5000"                  # 🔹 expone el OCR al host
+    volumes:
+      - ./ocr_ia:/app
+      - /tmp:/tmp
+    secrets:
+      - db_pass
+      - openai_api_key
+    networks:
+      - tasky_net                    # 🔹 red compartida
+
+  telegram_bot:
+    build:
+      context: ./telegram_bot
+    container_name: telegram_bot
+    restart: always
+    depends_on:
+      - ocr_ia
+      - postgres
+    working_dir: /app
+    command: python main.py
+    environment:
+      OCR_URL: http://ocr_ia:5000/process
+      DB_USER: ${DB_USER}
+      DB_NAME: ${DB_NAME}
+      DB_HOST: postgres
+    volumes:
+      - ./telegram_bot:/app
+      - /tmp:/tmp
+    secrets:
+      - db_pass
+      - telegram_token
+      - openai_api_key
+    networks:
+      - tasky_net
+
+volumes:
+  pgdata:
+
+secrets:
+  telegram_token:
+    file: ./secrets/telegram_token.txt
+  n8n_pass:
+    file: ./secrets/n8n_pass.txt
+  db_pass:
+    file: ./secrets/db_pass.txt
+  openai_api_key:
+    file: ./secrets/openai_api_key.txt
+
+# 🔹 Esta sección es la que faltaba 🔹
+networks:
+  tasky_net:
+    driver: bridge
