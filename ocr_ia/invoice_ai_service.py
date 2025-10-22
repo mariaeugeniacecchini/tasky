@@ -10,7 +10,7 @@ from datetime import datetime
 app = Flask(__name__)
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# --- Funciones de extracción ---
+# funciones de extracción
 def extract_text_from_pdf(pdf_bytes):
     """Extrae texto directo (si el PDF tiene texto embebido)."""
     text = ""
@@ -45,15 +45,15 @@ def extract_ocr_text(image_bytes):
             image = Image.open(io.BytesIO(image_bytes))
             return pytesseract.image_to_string(image, lang="spa")
     except Exception as e:
-        print(f" OCR fallback error: {e}")
+        pass
         return ""
 
 
-# --- Normalización de datos ---
+# normalización de datos
 def normalizar_factura(data):
     """Limpia y valida campos comunes de la factura (fecha, total)."""
     try:
-        # --- Normalizar y validar fecha ---
+        
         fecha_valida = None
         if "fecha" in data and data["fecha"]:
             texto = str(data["fecha"]).strip()
@@ -79,7 +79,7 @@ def normalizar_factura(data):
         else:
             data["fecha"] = ""
 
-        # --- Normalizar total ---
+        # normaliza el total
         if "total" in data and data["total"]:
             num = re.sub(r"[^\d,\.]", "", str(data["total"]))
             num = num.replace(",", ".")
@@ -89,16 +89,158 @@ def normalizar_factura(data):
                 data["total"] = 0.0
 
     except Exception as e:
-        print(f"⚠️ Error normalizando factura: {e}")
+        pass
 
     return data
 
 
-# --- Endpoint principal ---
+def detectar_tipo_documento(texto):
+    """Detecta si es una factura común o un comprobante de transferencia."""
+    texto_lower = texto.lower()
+    
+
+    
+    # indicadores específicos de transferencia bancaria
+    indicadores_transferencia = [
+        "comprobante de transferencia",
+        "importe debitado",
+        "cuenta destino", 
+        "titular cuenta destino",
+        "fecha de ejecución",
+        "cuenta débito",
+        "n° comprobante",
+        "nro comprobante",
+        "numero comprobante"
+    ]
+    
+    # nombres específicos de bancos
+    bancos = ["santander", "galicia", "bbva", "hsbc", "macro", "nación", "provincia"]
+    
+    # destinatarios conocidos que indican transferencia
+    destinatarios_conocidos = [
+        "menno gabriela alejandra",
+        "menno gabriela",
+        "grupo zafche", 
+        "zafche s.a.",
+        "cons ed mistica",
+        "mistica calle",
+        "calle 7 num 39",
+        "ed mistica"
+    ]
+    
+   
+    coincidencias_transferencia = sum(1 for ind in indicadores_transferencia if ind in texto_lower)
+    coincidencias_banco = sum(1 for banco in bancos if banco in texto_lower)
+    coincidencias_destinatarios = sum(1 for dest in destinatarios_conocidos if dest in texto_lower)
+    
+    
+    es_transferencia = (
+        
+        ("santander" in texto_lower and "comprobante" in texto_lower) or
+        
+        # reglas de respaldo
+        ("comprobante de transferencia" in texto_lower) or
+        ("importe debitado" in texto_lower) or
+        ("cuenta destino" in texto_lower) or
+        ("titular cuenta" in texto_lower) or
+        
+        # si menciona destinatarios específicos
+        any(dest in texto_lower for dest in ["cons ed mistica", "menno gabriela", "grupo zafche"])
+    )
+    
+    return "transferencia" if es_transferencia else "factura"
+
+    
+    return "transferencia" if es_transferencia else "factura"
+
+
+def procesar_transferencia_bancaria(texto):
+    """Procesa específicamente comprobantes de transferencias bancarias."""
+    
+    prompt_transferencia = """
+ANÁLISIS DE TRANSFERENCIA BANCARIA
+
+REGLA PRINCIPAL - IDENTIFICACIÓN DEL PROVEEDOR:
+El PROVEEDOR es quien RECIBE el dinero, NO el banco que procesa la transferencia.
+
+PROHIBIDO: "Santander", "Banco Santander", "Galicia", etc.
+CORRECTO: El nombre exacto del "Titular cuenta destino"
+
+CAMPOS A BUSCAR:
+- "Titular cuenta destino" - ESE es el proveedor
+- "Destinatario" - ESE es el proveedor  
+- "Beneficiario" - ESE es el proveedor
+
+CAMPOS A EXTRAER:
+1. **proveedor**: EL NOMBRE EXACTO del titular de la cuenta destino
+2. **fecha**: Busca "Fecha de ejecución" - formato DD/MM/YYYY  
+3. **total**: Busca "Importe debitado" - convierte a número decimal
+4. **items**: SIEMPRE: [{"nombre": "Transferencia bancaria", "precio": [TOTAL_NUMERICO]}]
+
+PROHIBICIÓN ABSOLUTA SOBRE EL PROVEEDOR:
+- NUNCA uses "Santander", "Galicia", "BBVA", etc. como proveedor
+- El banco es quien HACE la transferencia, NO quien la recibe
+- El proveedor SIEMPRE debe ser el "Titular cuenta destino"
+- Busca la línea que dice "Titular cuenta destino" y usa ESE texto exacto
+
+EJEMPLO CORRECTO:
+- Si ves "Titular cuenta destino: Cons Ed Mistica Calle 7 Num 39"
+- Entonces proveedor: "Cons Ed Mistica Calle 7 Num 39"
+- NUNCA proveedor: "Santander"
+
+5. **categoria**: Usa SOLO estas opciones:
+
+CATEGORÍAS OBLIGATORIAS:
+- Si titular contiene "Menno Gabriela" -> "Alquiler"  
+- Si titular contiene "Grupo Zafche" -> "Alquiler"
+- Si titular contiene "Cons Ed Mistica" -> "Expensas"
+- Cualquier otro caso -> "Otros"
+
+PROHIBICIONES:
+- NUNCA uses "Servicios" 
+- NUNCA uses "Facturas/Servicios"
+- NUNCA inventes categorías
+
+EJEMPLOS DE SALIDA CORRECTA:
+
+Para "Menno Gabriela Alejandra":
+{
+  "proveedor": "Menno Gabriela Alejandra",
+  "fecha": "03/10/2025",
+  "total": 199968.00,
+  "items": [{"nombre": "Transferencia bancaria", "precio": 199968.00}],
+  "categoria": "Alquiler"
+}
+
+Para "Grupo Zafche S.a.":
+{
+  "proveedor": "Grupo Zafche S.a.", 
+  "fecha": "03/10/2025",
+  "total": 268560.00,
+  "items": [{"nombre": "Transferencia bancaria", "precio": 268560.00}],
+  "categoria": "Alquiler"
+}
+
+Para "Cons Ed Mistica Calle 7 Num 39":
+{
+  "proveedor": "Cons Ed Mistica Calle 7 Num 39",
+  "fecha": "03/10/2025",
+  "total": 14691.00,
+  "items": [{"nombre": "Transferencia bancaria", "precio": 14691.00}],
+  "categoria": "Expensas"
+}
+
+ANALIZA ESTE COMPROBANTE:
+"""
+    
+    return prompt_transferencia + texto
+
+
+# endpoint principal
 @app.route("/process", methods=["POST"])
 def process_invoice():
     try:
-        # --- Entrada: desde JSON base64 o form-data ---
+    
         if request.is_json and "data" in request.json:
             file_bytes = base64.b64decode(request.json["data"])
             filename = request.json.get("filename", "file")
@@ -112,12 +254,19 @@ def process_invoice():
         if not file_bytes:
             return jsonify({"error": "El archivo está vacío"}), 400
 
-        # --- OCR previo ---
+        # OCR previo
         ocr_text = extract_ocr_text(file_bytes)
         ocr_text = re.sub(r"\s+", " ", ocr_text)
 
-        # --- Prompt principal (versión antitrampas) ---
-        prompt = """
+        
+        tipo_documento = detectar_tipo_documento(ocr_text)
+        
+        
+        if tipo_documento == "transferencia":
+            prompt = procesar_transferencia_bancaria(ocr_text)
+        else:
+            
+            prompt = """
 Analiza cuidadosamente la siguiente factura y devuelve los campos solicitados en formato JSON.
 
 Tu tarea es **extraer información REAL del documento, no inventarla**.  
@@ -133,8 +282,10 @@ Campos requeridos:
   2. Delivery (PedidosYa, Rappi)
   3. Petshop
   4. Farmacia
-  5. Otros
-  6. Servicios
+  5. Alquiler
+  6. Expensas
+  7. Otros
+  8. Servicios
 
 REGLAS IMPORTANTES:
 - **No uses la fecha del día actual bajo ningún motivo.**
@@ -155,24 +306,29 @@ Ejemplo de salida válida:
 }
 """
 
-        # --- Procesamiento según tipo de archivo ---
-        if filename.lower().endswith((".jpg", ".jpeg", ".png")):
-            image_base64 = base64.b64encode(file_bytes).decode("utf-8")
-            content = [
-                {"type": "text", "text": prompt + "\n\nTexto OCR extraído:\n" + ocr_text},
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
-            ]
-        elif filename.lower().endswith(".pdf"):
-            text = extract_text_from_pdf(file_bytes)
-            if not text or len(text) < 30:
-                text = extract_text_with_ocr(file_bytes)
-            if not text:
-                return jsonify({"error": "No se pudo extraer texto del PDF"}), 400
-            content = [{"type": "text", "text": f"{prompt}\n\nTexto de la factura:\n{text}"}]
+        # procesamiento según tipo de archivo
+        if tipo_documento == "transferencia":
+            
+            content = [{"type": "text", "text": prompt}]
         else:
-            return jsonify({"error": "Formato de archivo no soportado"}), 400
+            
+            if filename.lower().endswith((".jpg", ".jpeg", ".png")):
+                image_base64 = base64.b64encode(file_bytes).decode("utf-8")
+                content = [
+                    {"type": "text", "text": prompt + "\n\nTexto OCR extraído:\n" + ocr_text},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_base64}"}}
+                ]
+            elif filename.lower().endswith(".pdf"):
+                text = extract_text_from_pdf(file_bytes)
+                if not text or len(text) < 30:
+                    text = extract_text_with_ocr(file_bytes)
+                if not text:
+                    return jsonify({"error": "No se pudo extraer texto del PDF"}), 400
+                content = [{"type": "text", "text": f"{prompt}\n\nTexto de la factura:\n{text}"}]
+            else:
+                return jsonify({"error": "Formato de archivo no soportado"}), 400
 
-        #Llamada al modelo
+        # llamada al modelo
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -182,7 +338,7 @@ Ejemplo de salida válida:
             temperature=0.2,
         )
 
-        #Limpieza
+        # limpieza
         raw = response.choices[0].message.content.strip()
         clean = re.sub(r"^```json|```$", "", raw, flags=re.MULTILINE).strip()
 
@@ -197,7 +353,6 @@ Ejemplo de salida válida:
                     try:
                         f = datetime.strptime(fecha_str, fmt)
                         if f.date() == datetime.now().date() or f.date() > datetime.now().date():
-                            print(f"Fecha eliminada por ser igual o posterior al día actual: {fecha_str}")
                             parsed["fecha"] = ""
                         break
                     except Exception:
@@ -213,14 +368,10 @@ Ejemplo de salida válida:
                     try:
                         f = datetime.strptime(fecha_str, fmt)
                         if f.date() == datetime.now().date() or f > datetime.now():
-                            print(f"Fecha eliminada (después de normalizar): {fecha_str}")
                             parsed["fecha"] = ""
                         break
                     except Exception:
                         continue
-
-            if not parsed.get("fecha"):
-                print("Advertencia: No se detectó una fecha válida en el documento.")
 
             return jsonify(parsed), 200
 
@@ -228,7 +379,6 @@ Ejemplo de salida válida:
             return jsonify({"raw_response": raw}), 200
 
     except Exception as e:
-        print(f"Error procesando factura: {e}")
         return jsonify({"error": str(e)}), 500
 
 
