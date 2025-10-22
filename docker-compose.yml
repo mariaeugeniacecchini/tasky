@@ -68,6 +68,7 @@ services:
   telegram_bot:
     build:
       context: ./telegram_bot
+      dockerfile: Dockerfile
     container_name: telegram_bot
     restart: always
     depends_on:
@@ -81,8 +82,8 @@ services:
       DB_NAME: ${DB_NAME}
       DB_HOST: postgres
     volumes:
-      - ./telegram_bot:/app
-      - /tmp:/tmp
+      - ./telegram_bot/main.py:/app/main.py
+      - ./telegram_bot/entrypoint.sh:/app/entrypoint.sh
     secrets:
       - db_pass
       - telegram_token

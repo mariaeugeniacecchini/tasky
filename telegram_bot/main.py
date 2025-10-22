@@ -5,6 +5,7 @@ import requests
 from datetime import datetime
 from telegram import Update, InputFile
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from decimal import Decimal
 
 # Forzar backend sin GUI (para matplotlib dentro de Docker)
 import matplotlib
@@ -16,8 +17,7 @@ from io import BytesIO
 
 
 
-# CONFIGURACIÓN DE VARIABLES
-
+#config
 
 BOT_TOKEN = os.getenv("TELEGRAM_TOKEN")
 OCR_URL = os.getenv("OCR_URL", "http://ocr_ia:5000/process")
@@ -33,12 +33,10 @@ DB_HOST = os.getenv("DB_HOST", "db_facturas")
 if not BOT_TOKEN:
     raise SystemExit("⚠️ ERROR: No se encontró TELEGRAM_TOKEN en las variables de entorno (.env).")
 
-print("✅ Variables cargadas correctamente.")
-print(f"📡 OCR_URL: {OCR_URL}")
-print(f"🗄️  Base de datos: {DB_NAME} en {DB_HOST}")
 
 
-# CONEXIÓN A BASE DE DATOS
+
+# db
 conn = psycopg2.connect(
     host=DB_HOST,
     database=DB_NAME,
@@ -49,13 +47,13 @@ conn.autocommit = True
 
 
 
-# FUNCIONES DEL BOT
+
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("👋 ¡Hola! Envíame una foto de una factura para procesarla.")
 
-# --- Función auxiliar de parseo de fecha ---
+
 def parse_fecha_o_none(fecha_str: str):
     """Convierte texto de fecha a datetime.date o devuelve None si no es válida."""
     if not fecha_str:
@@ -65,7 +63,7 @@ def parse_fecha_o_none(fecha_str: str):
         try:
             f = datetime.strptime(fecha_str.strip(), fmt).date()
             hoy = datetime.today().date()
-            # Si la fecha es igual a hoy, futura o muy antigua, se descarta
+            
             if f >= hoy or f.year < 2000:
                 return None
             return f
@@ -76,7 +74,7 @@ def parse_fecha_o_none(fecha_str: str):
 
 
 
-# FUNCIÓN COMPARTIDA
+
 async def process_invoice_file(update: Update, file_path: str, file_name: str, mime_type: str):
     try:
         # Enviar archivo al servicio OCR
@@ -178,11 +176,7 @@ async def process_invoice_file(update: Update, file_path: str, file_name: str, m
         await update.message.reply_text(f"⚠️ Error al procesar la factura.\nDetalles: {e}")
 
 
-
-
-# HANDLER DE IMÁGENES
-
-
+#handlers
 async def handle_invoice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         photo = update.message.photo[-1]
@@ -195,11 +189,6 @@ async def handle_invoice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print("❌ Error en handle_invoice:")
         traceback.print_exc()
         await update.message.reply_text(f"⚠️ Error al procesar la imagen.\nDetalles: {e}")
-
-
-
-# HANDLER DE DOCUMENTOS 
-
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -214,9 +203,9 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await process_invoice_file(update, file_path, document.file_name, "application/pdf")
     except Exception as e:
         import traceback
-        print("❌ Error en handle_document:")
+        print(" Error en handle_document:")
         traceback.print_exc()
-        await update.message.reply_text(f"⚠️ Error al procesar el PDF.\nDetalles: {e}")
+        await update.message.reply_text(f" Error al procesar el PDF.\nDetalles: {e}")
 
 
 
@@ -227,7 +216,6 @@ async def promedio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         cursor = conn.cursor()
 
-        # Si el usuario envía /promedio <mes>
         args = context.args
         if args:
             mes_nombre = args[0].capitalize()
@@ -237,11 +225,10 @@ async def promedio(update: Update, context: ContextTypes.DEFAULT_TYPE):
             }
             mes_num = meses.get(mes_nombre)
             if not mes_num:
-                await update.message.reply_text("⚠️ Mes no válido. Ejemplo: /promedio Septiembre")
+                await update.message.reply_text("Mes no válido. Ejemplo: /promedio Septiembre")
                 cursor.close()
                 return
         else:
-            # No se especificó mes → tomar el de la última factura
             cursor.execute("SELECT EXTRACT(MONTH FROM fecha) FROM facturas ORDER BY fecha DESC LIMIT 1;")
             mes_num = cursor.fetchone()[0]
 
@@ -258,10 +245,10 @@ async def promedio(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"📊 Promedio de gasto para el mes {mes_nombre if args else 'actual'}: ${promedio_mensual:,.2f}"
             )
         else:
-            await update.message.reply_text("⚠️ No hay datos suficientes para calcular el promedio de ese mes.")
+            await update.message.reply_text("No hay datos suficientes para calcular el promedio de ese mes.")
     except Exception as e:
-        print(f"❌ Error en /promedio: {e}")
-        await update.message.reply_text("❌ Error al calcular el promedio mensual.")
+        print(f" Error en /promedio: {e}")
+        await update.message.reply_text(" Error al calcular el promedio mensual.")
 
 
 async def gastos(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -277,12 +264,12 @@ async def gastos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cursor.close()
 
     if rows:
-        text = "💰 *Gasto por proveedor:*\n"
+        text = " *Gasto por proveedor:*\n"
         for prov, suma in rows:
             text += f"• {prov}: ${suma:,.2f}\n"
         await update.message.reply_text(text, parse_mode="Markdown")
     else:
-        await update.message.reply_text("⚠️ No hay datos registrados aún.")
+        await update.message.reply_text(" No hay datos registrados aún.")
 
 
 async def resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -298,7 +285,7 @@ async def resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Noviembre": 11, "Diciembre": 12
         }
 
-        # Buscar si alguno de los argumentos es un mes
+       
         mes_nombre = None
         categoria_filtro = None
         for arg in args:
@@ -307,7 +294,7 @@ async def resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
             else:
                 categoria_filtro = arg
 
-        # Si no se especifica mes → usar el de la última factura
+        
         if mes_nombre:
             mes_num = meses[mes_nombre]
         else:
@@ -315,7 +302,7 @@ async def resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
             mes_num = cursor.fetchone()[0]
             mes_nombre = list(meses.keys())[int(mes_num) - 1]
 
-        # Construir consulta base
+        
         query_base = """
             SELECT COUNT(*), SUM(total), AVG(total)
             FROM facturas
@@ -330,7 +317,7 @@ async def resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cursor.execute(query_base, params)
         count, total, avg = cursor.fetchone()
 
-        # Gasto mensual por ítems (si aplica)
+        
         query_items = """
             SELECT SUM(i.precio_total)
             FROM facturas f
@@ -345,7 +332,7 @@ async def resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cursor.execute(query_items, params_items)
         gasto_mes = cursor.fetchone()[0] or 0
 
-        # Agrupar por categoría (solo si no se filtró una)
+        
         categorias = []
         if not categoria_filtro:
             cursor.execute("""
@@ -376,11 +363,12 @@ async def resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if categorias:
                 texto += "\n📂 *Gasto por categoría:*\n"
                 emojis = {
-                    "Comida/Supermercado": "🍞",
-                    "Delivery": "🚴",
-                    "Petshop": "🦴",
+                    "Supermercado": "🛒",
+                    "Delivery": "🍔",
+                    "Petshop": "🐈",
                     "Farmacia": "💊",
-                    "Otros": "📦"
+                    "Otros": "📦",
+                    "Servicios": "📄"
                 }
                 for categoria, suma in categorias:
                     emoji = emojis.get(categoria, "📦")
@@ -389,16 +377,21 @@ async def resumen(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(texto, parse_mode="Markdown")
         else:
             if categoria_filtro:
-                await update.message.reply_text(f"⚠️ No hay facturas registradas para la categoría '{categoria_filtro}' en {mes_nombre}.")
+                await update.message.reply_text(f" No hay facturas registradas para la categoría '{categoria_filtro}' en {mes_nombre}.")
             else:
-                await update.message.reply_text(f"⚠️ No hay facturas registradas para {mes_nombre}.")
+                await update.message.reply_text(f"No hay facturas registradas para {mes_nombre}.")
     except Exception as e:
-        print(f"❌ Error en /resumen: {e}")
-        await update.message.reply_text("❌ Error al generar el resumen mensual.")
+        print(f" Error en /resumen: {e}")
+        await update.message.reply_text(" Error al generar el resumen mensual.")
 
 
 async def resumen_general(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
+        import numpy as np
+        import matplotlib.pyplot as plt
+        from io import BytesIO
+        from decimal import Decimal
+
         cursor = conn.cursor()
 
         # 🗓️ Soporta /resumen_general <mes>
@@ -421,7 +414,7 @@ async def resumen_general(update: Update, context: ContextTypes.DEFAULT_TYPE):
             mes_num = int(cursor.fetchone()[0])
             mes_nombre = [k for k, v in meses.items() if v == mes_num][0]
 
-        # 📊 Totales por categoría del mes elegido
+        # 📊 Totales por categoría
         cursor.execute("""
             SELECT categoria, SUM(total)
             FROM facturas
@@ -436,57 +429,114 @@ async def resumen_general(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"⚠️ No hay facturas registradas para {mes_nombre}.")
             return
 
-        categorias = [r[0] for r in rows]
-        valores = [float(r[1]) for r in rows]
-        total = sum(valores)
+        # Normalizar categorías (ajustar nombre "Comida/Supermercado" → "Supermercado")
+        categorias = []
+        valores = []
+        for cat, val in rows:
+            if cat.lower() in ["comida/supermercado", "supermercado"]:
+                cat = "Supermercado"
+            categorias.append(cat)
+            valores.append(float(val) if isinstance(val, (Decimal, float, int)) else 0.0)
 
-        # Colores automáticos por proporción (rojo = más gasto)
-        cmap = cm.get_cmap('RdYlGn_r')
-        proporciones = np.array(valores) / max(valores)
-        colores = [cmap(p) for p in proporciones]
+        total = float(sum(valores))
 
-        # Gráfico
-        fig, ax = plt.subplots(figsize=(5, 5))
-        wedges, texts, autotexts = ax.pie(
+        # 🎨 Colores
+        colores = ["#FF6B6B", "#FFD93D", "#6BCB77", "#4D96FF", "#C77DFF", "#FF9CEE"][:len(valores)]
+
+        # --- Crear figura principal ---
+        fig, ax = plt.subplots(figsize=(6.5, 6.5), dpi=200)
+
+        wedges, _ = ax.pie(
             valores,
-            labels=None,
-            autopct=lambda p: f"{p:.1f}%" if p > 5 else "",
             startangle=90,
-            wedgeprops=dict(width=0.3),
-            colors=colores
+            colors=colores,
+            wedgeprops=dict(width=0.4, edgecolor="white")
         )
-        plt.text(0, 0, f"${total:,.0f}", ha="center", va="center", fontsize=16, fontweight="bold")
-        ax.set_title(f"Gastos por categoría — {mes_nombre}", fontsize=12)
 
-        # Guardar imagen en memoria
+        # Total en el centro
+        ax.text(
+            0, 0, f"${total:,.0f}",
+            ha="center", va="center",
+            fontsize=22, fontweight="bold", color="#222"
+        )
+
+        # ✅ Porcentajes más pegados al color
+        for i, (wedge, valor) in enumerate(zip(wedges, valores)):
+            ang = (wedge.theta2 + wedge.theta1) / 2
+            ang_rad = np.deg2rad(ang)
+            x = 0.9 * np.cos(ang_rad)
+            y = 0.9 * np.sin(ang_rad)
+            porcentaje = (valor / total) * 100 if total > 0 else 0
+
+            ax.text(
+                x, y,
+                f"{porcentaje:.1f}%",
+                ha="center", va="center",
+                fontsize=11,
+                color="black",
+                fontweight="bold"
+            )
+
+        # Título
+        ax.set_title(
+            f"Gastos por categoría — {mes_nombre}",
+            fontsize=15,
+            fontweight="bold",
+            pad=20
+        )
+
+        # Leyenda simple (solo texto + color)
+        ax.legend(
+            wedges,
+            categorias,
+            title="Categorías",
+            loc="lower center",
+            bbox_to_anchor=(0.5, -0.2),
+            fontsize=10.5,
+            title_fontsize=11,
+            ncol=2,
+            frameon=False
+        )
+
+        fig.patch.set_facecolor("white")
+        plt.tight_layout()
+
+        # Guardar imagen
         buffer = BytesIO()
-        plt.savefig(buffer, format='png', bbox_inches="tight", transparent=True)
+        plt.savefig(buffer, format="png", bbox_inches="tight", dpi=200)
         buffer.seek(0)
-        plt.close()
+        plt.close(fig)
 
-        # Enviar imagen
+        # Enviar gráfico
         await update.message.reply_photo(photo=InputFile(buffer, filename=f"resumen_{mes_nombre}.png"))
 
-        # Detalle textual debajo
-        detalle = f"📊 *Gastos de {mes_nombre}:*\n"
-        emojis = {
-            "Comida/Supermercado": "🍞",
-            "Delivery": "🚴",
-            "Petshop": "🦴",
+        # 🧾 Detalle textual con emojis correctos
+        emoji_map = {
             "Farmacia": "💊",
-            "Otros": "📦"
+            "Delivery": "🍔",
+            "Supermercado": "🛒",
+            "Facturas/Servicios": "📄",
+            "Servicios": "📄",
+            "Otros": "📦",
+            "Petshop": "🐈"
         }
-        for cat, val in zip(categorias, valores):
-            emoji = emojis.get(cat, "📦")
-            detalle += f"{emoji} {cat}: ${val:,.2f}\n"
+
+        detalle = f"📋 *Detalle de gastos — {mes_nombre}:*\n"
+        for categoria, valor in zip(categorias, valores):
+            emoji = emoji_map.get(categoria, "📦")
+            detalle += f"{emoji} {categoria}: ${valor:,.0f}\n"
 
         await update.message.reply_text(detalle, parse_mode="Markdown")
 
     except Exception as e:
         import traceback
-        print("❌ Error en /resumen_general:")
+        print(" Error en /resumen_general:")
         traceback.print_exc()
-        await update.message.reply_text(f"❌ Error al generar el resumen general.\nDetalles: {e}")
+        await update.message.reply_text(f" Error al generar el resumen general.\nDetalles: {e}")
+
+
+
+
 
 # MAIN
 
@@ -501,5 +551,5 @@ if __name__ == "__main__":
     app.add_handler(MessageHandler(filters.PHOTO, handle_invoice))
     app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
 
-    print("🤖 Bot iniciado y escuchando mensajes...")
+    
     app.run_polling()

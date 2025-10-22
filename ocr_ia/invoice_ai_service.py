@@ -45,7 +45,7 @@ def extract_ocr_text(image_bytes):
             image = Image.open(io.BytesIO(image_bytes))
             return pytesseract.image_to_string(image, lang="spa")
     except Exception as e:
-        print(f"❌ OCR fallback error: {e}")
+        print(f" OCR fallback error: {e}")
         return ""
 
 
@@ -129,14 +129,14 @@ Campos requeridos:
 - **total**: el importe total (buscar palabras como 'TOTAL', 'TOTAL FINAL', 'IMPORTE A PAGAR', 'TOTAL FACTURA').
 - **items**: lista de productos o conceptos, con nombre y precio (si están visibles).
 - **categoria**: clasifica en una de estas:
-  1. Comida/Supermercado
-  2. Delivery
+  1. Supermercado
+  2. Delivery (PedidosYa, Rappi)
   3. Petshop
   4. Farmacia
   5. Otros
   6. Servicios
 
-🚫 REGLAS IMPORTANTES:
+REGLAS IMPORTANTES:
 - **No uses la fecha del día actual bajo ningún motivo.**
 - **Si no estás seguro de la fecha, deja `"fecha": ""`.**
 - Usa solo la fecha que esté junto a palabras como “Fecha”, “Emisión”, “Factura”, “Fecha de compra”.
@@ -151,7 +151,7 @@ Ejemplo de salida válida:
   "fecha": "12/09/2024",
   "total": 4532.40,
   "items": [{"nombre": "Pan", "precio": 250.00}],
-  "categoria": "Comida/Supermercado"
+  "categoria": "Supermercado"
 }
 """
 
@@ -172,7 +172,7 @@ Ejemplo de salida válida:
         else:
             return jsonify({"error": "Formato de archivo no soportado"}), 400
 
-        # --- Llamada al modelo ---
+        #Llamada al modelo
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
@@ -182,14 +182,14 @@ Ejemplo de salida válida:
             temperature=0.2,
         )
 
-        # --- Limpieza y parseo ---
+        #Limpieza
         raw = response.choices[0].message.content.strip()
         clean = re.sub(r"^```json|```$", "", raw, flags=re.MULTILINE).strip()
 
         try:
             parsed = json.loads(clean)
 
-            # --- PRIMER FILTRO DURO: anula fechas iguales a hoy o futuras ---
+            # anula fechas iguales a hoy o futuras
             if parsed.get("fecha"):
                 fecha_str = str(parsed["fecha"]).strip()
                 formatos = ["%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%y"]
@@ -197,30 +197,30 @@ Ejemplo de salida válida:
                     try:
                         f = datetime.strptime(fecha_str, fmt)
                         if f.date() == datetime.now().date() or f.date() > datetime.now().date():
-                            print(f"🚫 Fecha eliminada por ser igual o posterior al día actual: {fecha_str}")
+                            print(f"Fecha eliminada por ser igual o posterior al día actual: {fecha_str}")
                             parsed["fecha"] = ""
                         break
                     except Exception:
                         continue
 
-            # --- Normalización posterior ---
+            
             parsed = normalizar_factura(parsed)
 
-            # --- SEGUNDO FILTRO DURO: vuelve a verificar después de normalizar ---
+            #vuelve a verificar después de normalizar
             if parsed.get("fecha"):
                 fecha_str = parsed["fecha"]
                 for fmt in ["%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%y"]:
                     try:
                         f = datetime.strptime(fecha_str, fmt)
                         if f.date() == datetime.now().date() or f > datetime.now():
-                            print(f"🚫 Fecha eliminada (después de normalizar): {fecha_str}")
+                            print(f"Fecha eliminada (después de normalizar): {fecha_str}")
                             parsed["fecha"] = ""
                         break
                     except Exception:
                         continue
 
             if not parsed.get("fecha"):
-                print("⚠️ Advertencia: No se detectó una fecha válida en el documento.")
+                print("Advertencia: No se detectó una fecha válida en el documento.")
 
             return jsonify(parsed), 200
 
@@ -228,7 +228,7 @@ Ejemplo de salida válida:
             return jsonify({"raw_response": raw}), 200
 
     except Exception as e:
-        print(f"❌ Error procesando factura: {e}")
+        print(f"Error procesando factura: {e}")
         return jsonify({"error": str(e)}), 500
 
 
